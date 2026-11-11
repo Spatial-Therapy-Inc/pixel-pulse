@@ -30,6 +30,8 @@ void ui_status(cJSON *reply);
 
 #if CONFIG_YAY_DEV
 #include "esp_err.h"
-/** Development builds: `yk cmd pixelpulse.dev {"what":"hours|care|taps|visit|game|pet|reset","n":N}`. Under board_lock(). */
+/** Development builds: `yk cmd pixelpulse.dev {"what":…,"n":N}`, under board_lock(). what: tap (0 the companion, 1
+ *  blank), feed N, shake, down / up (face down, picked up), key (a short press), swipe (0 left, 1 right, 2 down, 3 up),
+ *  hours N, care N, taps N, visit, game, pet N, reset [first]. */
 esp_err_t ui_dev(const char *what, int n, cJSON *reply);
 #endif

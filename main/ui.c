@@ -669,7 +669,7 @@ static void game_tick(int64_t now) {
     const int head = head_y(g, cs, cy);
     for (int i = 0; i < ITEMS; i++) {
         if (!s_items[i].on) continue;
-        const float y = C - 196 + (now - s_items[i].t0) * 0.17f;
+        const float y = C - 150 + (now - s_items[i].t0) * 0.17f;  // from under the score
         if (y >= head && y <= GROUND && fabsf(s_items[i].x - px) < SP_G * cs * 0.45f) {
             s_score += s_items[i].heart ? 3 : 1;
             sound_play(s_items[i].heart ? SOUND_HEART : SOUND_STAR, (pp_id_t)s_cur);
@@ -1139,8 +1139,10 @@ void ui_leave(void) {
     if (pp_alive(p)) {
         snprintf(value, sizeof(value), "%d", p->care);
         yk_summary_stat(&summary, value, s_en ? "care" : "照顾点");
-        snprintf(value, sizeof(value), "%d", p->love);
-        yk_summary_stat(&summary, value, s_en ? "love" : "亲近");
+        if (p->love > 0) {  // a 0 on the main screen's ring reads as a failure
+            snprintf(value, sizeof(value), "%d", p->love);
+            yk_summary_stat(&summary, value, s_en ? "love" : "亲近");
+        }
     }
     yk_app_set_result_summary(sentence, &summary, NULL);
 }
@@ -1169,7 +1171,33 @@ void ui_status(cJSON *reply) {
 // Development builds only: move time and points along to try every stage without waiting days.
 esp_err_t ui_dev(const char *what, int n, cJSON *reply) {
     const int64_t now = now_ms();
-    if (!strcmp(what, "hours")) {
+    // like a person at the screen: it wakes first (the screen may have gone off on its own)
+    if (strcmp(what, "down")) screen_wake();
+    input();
+    if (!strcmp(what, "tap")) {  // 0: on the companion, 1: on the empty left
+        tap(n ? C - 180 : C + (int)s_pet_x, n ? C : GROUND - 40);
+    } else if (!strcmp(what, "feed")) {
+        for (int i = 0; i < n; i++) feed_one();
+    } else if (!strcmp(what, "shake")) {
+        shake();
+    } else if (!strcmp(what, "down")) {
+        __atomic_fetch_or(&s_flags, F_DOWN, __ATOMIC_RELAXED);
+    } else if (!strcmp(what, "up")) {
+        __atomic_fetch_or(&s_flags, F_UP, __ATOMIC_RELAXED);
+    } else if (!strcmp(what, "key")) {
+        ui_key_tap();
+    } else if (!strcmp(what, "swipe")) {  // 0 left, 1 right, 2 down, 3 up: as the release of a swipe does
+        if (n <= 1) {
+            if (s_status) page_close();
+            set_pet((s_cur + (n == 0 ? 1 : PP_PETS - 1)) % PP_PETS);
+        } else if (n == 2) {
+            if (!s_status && !s_visit) s_status = true, page_show();
+        } else if (s_status) {
+            page_close();
+        } else if (!s_visit) {
+            game_start();
+        }
+    } else if (!strcmp(what, "hours")) {
         pp_decay(&S, (int64_t)n * 3600);
     } else if (!strcmp(what, "care")) {
         on_event(pp_add_care(&S, (pp_id_t)s_cur, n), s_cur);
