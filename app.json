@@ -3,8 +3,8 @@
   "kind": "extension",
   "version": "0.1.0",
   "name": {
-    "zh": "pixel-pulse",
-    "en": "pixel-pulse"
+    "zh": "像素悸动",
+    "en": "Pixel Pulse"
   },
   "boards": [
     "tikpal-r1"
@@ -15,36 +15,68 @@
   "capabilities": {},
   "launch": {
     "summary": {
-      "zh": "计数器样板：短按加一，按住清零。",
-      "en": "Counter template: tap to count, hold to reset."
+      "zh": "像素宠物：把 Pip、Mote、Dial、Bloom 从一颗蛋养大。摸摸、喂饭、摇一摇陪它玩、扣下睡觉、往上滑接星星。",
+      "en": "Pixel pets: raise Pip, Mote, Dial and Bloom from an egg. Pet them, feed them, shake to play, turn over to sleep, swipe up to catch stars."
     },
     "examples": {
       "zh": [
-        "打开计数器",
-        "帮我数数"
+        "打开像素悸动",
+        "看看我的 Dial",
+        "喂一下 Mote",
+        "陪 Pip 玩",
+        "我想养个宠物",
+        "看看我的蛋孵出来没有"
       ],
       "en": [
-        "Open the counter",
-        "Count for me"
+        "Open Pixel Pulse",
+        "Show me my Dial",
+        "Feed Mote",
+        "Play with Pip",
+        "I want to raise a pet",
+        "Has my egg hatched yet"
       ]
+    },
+    "params": {
+      "pet": {
+        "type": "string",
+        "description": "要看哪一只伙伴",
+        "enum": [
+          "pip",
+          "mote",
+          "dial",
+          "bloom"
+        ]
+      },
+      "action": {
+        "type": "string",
+        "description": "进来做什么：see 看看，feed 喂饭，play 接星星",
+        "enum": [
+          "see",
+          "feed",
+          "play"
+        ]
+      }
     }
   },
   "aliases": {
     "zh": [
-      "计数器"
+      "像素宠物",
+      "养宠物",
+      "电子宠物"
     ],
     "en": [
-      "Counter"
+      "Pixel pets",
+      "Virtual pet"
     ]
   },
   "scenes": [
-    "tools"
+    "relax"
   ],
   "audience": "all",
   "pricing": {
     "kind": "free"
   },
   "voiceCode": {
-    "number": 65280
+    "number": 266
   }
 }

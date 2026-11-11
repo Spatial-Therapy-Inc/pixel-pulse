@@ -1,115 +1,51 @@
-// Extension firmware template (yaykit/docs/development/firmware-guide.md 6, yay-device.md 6.10). It shows the
-// order every extension firmware follows: NVS (never erased) -> yaykit_app (crash loop guard) -> board -> side
-// key -> Yaykit Link -> screen -> console -> yk_app_ready(). The app itself is a tap counter: tap adds one, hold resets, a double
-// click opens the app ring (yaykit_app), and the first time in the app the hint arrow says so (yk_hint APPS). A button
-// shows the app's 应用码 for the Tikpal app to scan (yaykit_voicecode, API level 4; devkit docs/voice-code.md): the same
-// page code the system pull-down shows, here to show how; drop it if the app has no use for it. Copy this directory,
-// rename the slug and the project, then replace the counter with your app.
+// Pixel Pulse (像素悸动): the four companions as pixel pets, raised from an egg (design v0.4). The start follows the
+// template's order: NVS (never erased) -> yaykit_app -> board, clock, speaker -> side key, motion -> Yaykit Link ->
+// launch parameters -> the screen -> console -> yk_app_ready(). The screen and the rules are in ui.c and pet.c.
 #include <stdio.h>
 #include <string.h>
 
 #include "board.h"
 #include "cjk_font.h"
-#include "counter.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "nvs_flash.h"
+#include "pet.h"
+#include "sound.h"
+#include "ui.h"
 #include "yaykit_app.h"
 #include "yaykit_key.h"
 #include "yaykit_link.h"
+#include "yaykit_motion.h"
 #include "yaykit_ui.h"
-#include "yk_hint.h"
 #include "yk_vc_view.h"
 
 #define APP_SLUG "pixel-pulse"
 static const char *TAG = "pixel-pulse";
 
-static counter_t s_count;
-static int s_rounds, s_best_round = -1;  // rounds ended with a hold, and which one was the best (0-based)
-static lv_obj_t *s_value;
-static volatile bool s_tapped, s_held;  // set in the key task, acted on in the LVGL task
-
-/** Through yaykit_app (yk_app_on_key): returns whether the event was used. A hold an app does not use asks
- *  「回到 Pip 说？」; this one uses both. */
+/** Through yaykit_app: a short press is ours (the game, the status page, the screen); the hold is not, so the system
+ *  asks 「回到 Pip 说？」; the double click is the app ring. */
 static bool on_key(const yk_key_event_t *ev, void *ctx) {
     (void)ctx;
-    if (yk_vc_on_key(ev)) return true;  // a tap while the code shows hides it, and counts nothing
-    if (ev->type == YK_KEY_TAP) s_tapped = true;
-    else if (ev->type == YK_KEY_HOLD) s_held = true;
-    // YK_KEY_DOUBLE is yaykit_app's: the app ring.
-    return ev->type == YK_KEY_TAP || ev->type == YK_KEY_HOLD;
-}
-
-static void show(void) {
-    char text[32];
-    counter_text(&s_count, false, text, sizeof(text));
-    lv_label_set_text(s_value, text);
-}
-
-/** LVGL timer: runs with the board lock held, so it may touch the screen. */
-static void tick(lv_timer_t *timer) {
-    (void)timer;
-    if (s_tapped) {
-        s_tapped = false;
-        counter_tap(&s_count);
-        printf("PIXEL_PULSE_TAP count=%d\n", s_count.taps);
-        show();
+    if (yk_vc_on_key(ev)) return true;
+    if (ev->type == YK_KEY_TAP) {
+        ui_key_tap();
+        return true;
     }
-    if (s_held) {
-        s_held = false;
-        s_rounds++;
-        const bool best = counter_reset(&s_count);
-        if (best) s_best_round = s_rounds - 1;
-        printf("PIXEL_PULSE_RESET best=%d new=%d\n", s_count.best, best);
-        show();
-    }
+    return false;
 }
 
-/** The code gone (its 60 s, a tap or a swipe on it, the side key): the screen may go off again. */
-static void code_hidden(yk_vc_hidden_t why, void *ctx) {
-    (void)why, (void)ctx;
-    yk_app_keep_screen_on(false);
+static void on_motion(const yk_motion_event_t *ev, void *ctx) {
+    (void)ctx;
+    ui_motion(ev);
 }
 
-/** The button: this app's page code (action 0, value 0); the Tikpal app opens the app's page when it scans it. Its
- *  number is app.json's voiceCode.number, built in. The screen would go off (30 s) before the code hides (60 s): kept on
- *  while it shows. */
-static void on_code(lv_event_t *e) {
-    (void)e;
-    if (yk_vc_show(YK_VC_ACTION_PAGE, 0, &(yk_vc_show_opts_t){.on_hidden = code_hidden}) == ESP_OK)
-        yk_app_keep_screen_on(true);
-}
-
-/** Leaving for the main firmware (a double click, app.exit): a record for the platform and what the buddy shows and
- *  says when it is back. Runs in a task of yaykit_app's, cut after YK_APP_LEAVE_MS (400 ms): keep it to writing. */
 static void on_leave(void *ctx) {
     (void)ctx;
-    const int taps = s_count.taps, rounds = s_rounds + (taps > 0);
-    if (!rounds) return;  // nothing happened: the main firmware just comes back
-    char data[64];
-    snprintf(data, sizeof(data), "{\"taps\":%d,\"rounds\":%d}", taps, rounds);
-    // The record waits in the outbox until the main firmware is online (yk_app_record): the app needs no network.
-    const bool recorded = yk_app_record("pixelpulse.count", data) == ESP_OK;
-    // The summary the main firmware draws in its ring: up to 3 numbers, a bead per round (the best one in coral).
-    yk_summary_t summary;
-    yk_summary_init(&summary);
-    char value[12];
-    snprintf(value, sizeof(value), "%d", rounds);
-    yk_summary_stat(&summary, value, "轮");
-    snprintf(value, sizeof(value), "%d", s_count.best > taps ? s_count.best : taps);
-    yk_summary_stat(&summary, value, "最多");
-    yk_summary_beads(&summary, rounds, &s_best_round, s_best_round >= 0);
-    summary.recorded = recorded;
-    // One sentence the buddy says (not after 30 minutes), and data for the platform.
-    char sentence[48];
-    snprintf(sentence, sizeof(sentence), "数了 %d 轮", rounds);
-    cJSON *doc = cJSON_Parse(data);
-    yk_app_set_result_summary(sentence, &summary, doc);
-    cJSON_Delete(doc);
+    sound_stop_all();
+    ui_leave();
 }
 
 static esp_err_t on_command(const char *name, const cJSON *args, cJSON *reply, const char **code, void *ctx) {
@@ -118,10 +54,25 @@ static esp_err_t on_command(const char *name, const cJSON *args, cJSON *reply, c
     esp_err_t err = yk_app_command(name, args, reply, code);  // app.exit, app.recovery, app.status
     if (err != ESP_ERR_NOT_SUPPORTED) return err;
     if (!strcmp(name, "pixelpulse.status")) {
-        cJSON_AddNumberToObject(reply, "taps", s_count.taps);
-        cJSON_AddNumberToObject(reply, "best", s_count.best);
+        board_lock(-1);
+        ui_status(reply);
+        board_unlock();
         return ESP_OK;
     }
+#if CONFIG_YAY_DEV
+    if (!strcmp(name, "pixelpulse.dev")) {
+        const cJSON *what = cJSON_GetObjectItem(args, "what"), *n = cJSON_GetObjectItem(args, "n");
+        if (!cJSON_IsString(what)) {
+            *code = "BAD_ARGS";
+            return ESP_ERR_INVALID_ARG;
+        }
+        board_lock(-1);
+        err = ui_dev(what->valuestring, cJSON_IsNumber(n) ? n->valueint : 1, reply);
+        board_unlock();
+        if (err != ESP_OK) *code = "BAD_ARGS";
+        return err;
+    }
+#endif
     *code = "UNKNOWN_COMMAND";
     return ESP_ERR_NOT_SUPPORTED;
 }
@@ -150,55 +101,65 @@ static void start_console(void) {
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
 
+/** {"pet":"dial","action":"feed"}: 「看看我的 Dial」、「喂一下 Mote」、「陪 Pip 玩」. */
+static void read_launch(ui_config_t *cfg) {
+    yk_launch_t launch;
+    if (yk_app_launch(&launch) != ESP_OK || !launch.present) return;
+    printf("PIXELPULSE_LAUNCH intent=%s params=%s\n", launch.intent, launch.params);
+    cJSON *doc = cJSON_Parse(launch.params);
+    if (!doc) return;
+    const cJSON *pet = cJSON_GetObjectItem(doc, "pet"), *action = cJSON_GetObjectItem(doc, "action");
+    if (cJSON_IsString(pet)) cfg->launch_pet = pp_from_name(pet->valuestring);
+    if (cJSON_IsString(action)) {
+        const char *a = action->valuestring;
+        cfg->launch_action = !strcmp(a, "feed") ? UI_ACT_FEED : !strcmp(a, "play") ? UI_ACT_PLAY : UI_ACT_SEE;
+    }
+    cJSON_Delete(doc);
+}
+
 void app_main(void) {
     // 1. NVS: never erase it (it is shared with every app and holds the Wi-Fi credentials).
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) ESP_LOGE(TAG, "NVS unavailable (%s); running without saved settings", esp_err_to_name(err));
-    // 2. yaykit_app first, so that a crash anywhere below counts towards the crash loop guard (it also subscribes
-    //    for the double click home).
+    // 2. yaykit_app first, so that a crash anywhere below counts towards the crash loop guard.
     ESP_ERROR_CHECK(yk_app_start(&(yk_app_config_t){.slug = APP_SLUG, .version = APP_VERSION}));
     yk_app_on_leave(on_leave, NULL);
-    // 3. Board and screen (dark until the first frame: no flash of a blank screen after the switch), then the side key.
+    // 3. Board and screen (dark until the first frame), the clock (the meters go down by the hours), the speaker.
     if (!board_display_start_opts(&(board_display_opts_t){.start_dark = true})) {
         ESP_LOGE(TAG, "display failed");
         return;
     }
-    // delay_tap: the first press of a double click (the app ring) is not a tap; a tap comes 0.45 s after its release.
+    board_rtc_init();
+    sound_init();
+    // delay_tap: the first press of a double click (the app ring) is not a tap.
     ESP_ERROR_CHECK(yk_key_init(&(yk_key_config_t){.delay_tap = true}));
     ESP_ERROR_CHECK(yk_app_on_key(on_key, NULL));
+    // Motion: shake to play, tilt to walk, face down to sleep. A hand's shake is gentler than the dice's 0.8 g.
+    static yk_motion_thresholds_t motion_th;
+    yk_motion_default_thresholds(&motion_th);
+    motion_th.shake_peak_g = 0.5f;
+    if (yk_motion_start(&(yk_motion_config_t){.thresholds = &motion_th, .on_event = on_motion}) != ESP_OK)
+        ESP_LOGW(TAG, "no motion sensor: shaking, tilting and face down do nothing");
     // 4. Yaykit Link: `yk info` and `yk cmd` over USB (BLE stays off until asked for).
     const yk_link_config_t link = {.board = "tikpal-r1", .app_slug = APP_SLUG, .app_version = APP_VERSION,
                                    .layout = "yaykit-v1", .idle_seconds = 90, .on_command = on_command};
     ESP_ERROR_CHECK(yk_link_init(&link));
-    // 5. Launch parameters from the main firmware (read once).
-    yk_launch_t launch;
-    if (yk_app_launch(&launch) == ESP_OK && launch.present) printf("PIXEL_PULSE_LAUNCH intent=%s params=%s\n", launch.intent, launch.params);
+    // 5. Launch parameters and the owner's language.
+    char locale[16];
+    yk_app_locale(locale, sizeof(locale));
+    ui_config_t cfg = {.english = yk_app_english(), .launch_pet = -1, .launch_action = UI_ACT_NONE};
+    read_launch(&cfg);
 
     // 6. The screen; then confirm the image (the bootloader would roll back an app that never gets here).
     board_lock(-1);
+    if (locale[0]) cjk_font_set_language(locale);
     ESP_ERROR_CHECK(cjk_font_init());
-    lv_obj_t *screen = lv_obj_create(NULL);
-    lv_obj_set_scrollable(screen, false);
-    // The round-screen spec's colours and sizes (yk_round.h): the same on every firmware.
-    lv_obj_set_style_bg_color(screen, lv_color_hex(YK_PAPER), 0);
-    yk_ui_label(screen, "计数", 0, 100, 466, YK_SIZE_STATUS, YK_SAGE_TEXT);
-    s_value = yk_ui_label(screen, "", 0, 190, 466, 44, YK_INK);
-    yk_ui_label(screen, "短按加一 · 按住清零", 0, 318, 466, YK_SIZE_MIN, YK_INK2);
-    yk_ui_button(screen, "在手机上打开", 148, 352, 170, 44, on_code, NULL, YK_PANEL);
-    show();
-    lv_screen_load(screen);
+    yk_ui_set_english(cfg.english);
+    ui_start(&cfg);
     lv_refr_now(NULL);
-    // The main firmware's settings through yaykit_app (0.1.13): the brightness (capped while the battery is low), and
-    // as needed yk_app_screen_off_s() for the screen-off, yk_app_volume() / yk_app_set_volume(), yk_app_english(). The
-    // battery guard (sleep when it runs out) comes with yk_app_start() and yk_app_ready() by itself.
     board_brightness_set(yk_app_brightness());
-    // The first time in this app: an arrow at the side key, 「双击：应用和回家」 (yk_hint, P24), until the app ring was
-    // opened once. Any press takes it away (yaykit_app).
-    if (yk_hint_should(YK_HINT_APPS)) yk_hint_show(screen, YK_HINT_APPS, NULL);
-    lv_timer_create(tick, 50, NULL);
     board_unlock();
-    // 7. The console, then yk_app_ready(): its banner tells tools the app is up, so the console must already
-    //    listen (a command sent right after the banner was lost when the console came second).
+    // 7. The console, then yk_app_ready(): its banner tells tools the app is up, so the console must already listen.
     start_console();
     yk_app_ready();
 }

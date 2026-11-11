@@ -1,14 +1,40 @@
-# pixel-pulse
+# 像素悸动 · Pixel Pulse
 
-一个 Tikpal 应用（Tikpal Voice 的扩展固件），用 Tikpal 开发包做的。
+Tikpal Voice 的扩展应用（应用编号 266），用 Tikpal 开发包 1.9 做的：把 Pip、Mote、Dial、Bloom 四个伙伴当像素宠物，从一颗蛋养大。设计稿 v0.4 见开发者自己的设计页。
 
 ```bash
 ./kit build              # 编译，再跑主机测试
 ./kit install --slot 2   # USB 写进测试圆屏的位置 2，写完直接打开
-./kit logs               # 看日志；./kit snap 截图，./kit heap 看内存
+./kit logs               # 看日志（PIXELPULSE_ 开头的是本应用打的）；./kit snap 截图，./kit heap 看内存
 ./kit build --release    # 提交用的那份
 ```
 
-- `devkit/` 是开发包（git 子模块），钉在一个版本上，别改它。`git clone` 这个仓库以后，`./kit` 会自己把它拉下来。
-- 应用清单是 `app.json`；逻辑写在 `main/`，能不依赖 ESP-IDF 的部分写成纯 C，`test/run.sh` 在电脑上测。
+## 玩法
+
+| 操作 | 做什么 |
+|---|---|
+| 点伙伴 | 摸摸：跳一下，心口冒像素心；是蛋就裂一点，点 10 下破壳 |
+| 点空白 | 它看向你点的那边 |
+| 沿边缘转 | 喂饭，每 45° 一粒 |
+| 摇一摇 | 陪它转圈 |
+| 倾斜 | 它往低的一边走 |
+| 扣下 | 睡觉（熄屏）；扣下超过 10 秒再拿起，算睡了一觉 |
+| 左右滑 | 换伙伴 |
+| 从中间往下滑 | 状态页；往上滑收起 |
+| 往上滑 | 接星星，20 秒 |
+| 侧键短按 | 结束接星星、收起状态页，否则息屏 / 亮屏 |
+
+长大不看日历，看照顾点：只在它需要的时候照顾才算（不饱时喂一粒 +1，乐没满时摇一摇 +1，累了睡一觉 +2，接星星一局 +3，串门 +1）。宝宝攒 40 点长大，再攒 80 点换装扮。养大一只，下一颗蛋出现（Pip → Mote → Dial → Bloom）；两只长大以后，打开时偶尔有伙伴来串门。
+
+「按住伙伴，它听你说话」要麦克风，能力还在开发者平台等人工批，这一版没有。
+
+## 代码
+
+- `main/pet.c`：养成规则（纯 C，主机测试）。
+- `main/sprites.c`：四个伙伴的 32 × 32 像素稿，用形状参数在开机时生成，和设计页原型的一格不差（纯 C，主机测试）。
+- `main/render.c`：把格子画成 LVGL 的 RGB565A8 图，眨眼、看过去、闭嘴、翻身（纯 C，主机测试）。
+- `main/ui.c`：界面、手势、接星星、串门、状态页；`main/sound.c`：合成的叫声和音效；`main/store.c`：存档（NVS 命名空间 `yk_pixelpulse`）。
+- 开发版多一个命令，方便不用等几天就试遍各阶段：`yk cmd pixelpulse.dev {"what":"hours|care|taps|visit|game|pet|reset","n":N}`。发布版没有。
+
+- `devkit/` 是开发包（git 子模块），钉在一个版本上，别改它。
 - 做完、自测过，照 `devkit/AGENTS.md` 第 4 步 `./kit submit` 打提交包，到开发者平台 developer.tikpal.ai 这个应用的「版本」页上传。
