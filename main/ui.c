@@ -945,6 +945,12 @@ static void tick(lv_timer_t *timer) {
     (void)timer;
     const int64_t now = now_ms();
     handle_flags(now);
+    // The app ring or 「回到 Yay 说？」 opened over us (a double or a hold on the key): it must be seen, even when
+    // our screen was out; and the idle time does not run out under it.
+    if (yk_apps_is_open() || yk_apps_ask_is_open()) {
+        screen_wake();
+        s_input_ms = now;
+    }
     if (s_asleep) return;
     // the clock: the meters go down as the hours pass (only with a real time)
     static int64_t last_decay;
