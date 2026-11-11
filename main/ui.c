@@ -28,7 +28,7 @@
 #define VISIT_MS 30000
 #define VISIT_DELAY_MS 10000
 #define SLEEP_MIN_MS 10000  // face down at least this long counts as a sleep
-#define SAVE_EVERY_MS 20000
+#define SAVE_EVERY_MS 120000  // review F-06: flash writes minutes apart
 #define PARTS 12
 #define ITEMS 8
 
@@ -951,7 +951,7 @@ static void tick(lv_timer_t *timer) {
     if (now - last_decay > 60000) {
         last_decay = now;
         const time_t t = time(NULL);
-        if (t > 1700000000) pp_decay_to(&S, (int64_t)t), s_dirty = true;
+        if (t > 1700000000) pp_decay_to(&S, (int64_t)t);  // not saved for this: the next start works it out again from the saved clock
     }
     // a visit, if one is due
     if (s_visit_at > 0 && now >= s_visit_at) {
